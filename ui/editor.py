@@ -6,11 +6,11 @@ import streamlit as st
 
 
 def render_editor_form() -> Dict[str, Any]:
-    st.title("Shotstack Video Editor")
-    st.caption("Upload a video, set simple edits, and render using your Shotstack Production API key.")
+    st.title("JSON2Video Video Editor")
+    st.caption("Upload a video, set simple edits, and render using your JSON2Video API key.")
 
     with st.form("video-editor-form"):
-        api_key = st.text_input("Shotstack Production API key", type="password")
+        api_key = st.text_input("JSON2Video API key", type="password")
         video_file = st.file_uploader("Upload video", type=["mp4", "mov", "webm", "m4v"])
 
         st.subheader("Editing Controls")
