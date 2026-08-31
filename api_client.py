@@ -119,17 +119,17 @@ def _request(
         return response.text
 
 
-def _upload_video_source(api_key: str, video_bytes: bytes) -> str:
-    content_type = mimetypes.guess_type("clip.mp4")[0] or "video/mp4"
+def _upload_media_source(api_key: str, file_name: str, file_bytes: bytes, default_content_type: str) -> str:
+    content_type = mimetypes.guess_type(file_name)[0] or default_content_type
     upload_response = _request(
         settings.JSON2VIDEO_BASE_URL,
         "POST",
         MEDIA_UPLOAD_ENDPOINT,
         api_key,
         json_payload={
-            "name": "clip.mp4",
+            "name": file_name,
             "contentType": content_type,
-            "size": len(video_bytes),
+            "size": len(file_bytes),
         },
         timeout=settings.DEFAULT_TIMEOUT,
     )
@@ -142,7 +142,7 @@ def _upload_video_source(api_key: str, video_bytes: bytes) -> str:
 
     put_response = requests.put(
         upload_url,
-        data=video_bytes,
+        data=file_bytes,
         headers={"Content-Type": content_type},
         timeout=settings.UPLOAD_TIMEOUT,
     )
@@ -151,12 +151,35 @@ def _upload_video_source(api_key: str, video_bytes: bytes) -> str:
     return str(file_url)
 
 
+def _upload_video_source(api_key: str, video_bytes: bytes) -> str:
+    return _upload_media_source(api_key, "clip.mp4", video_bytes, "video/mp4")
+
+
 def _build_movie_payload(
     source_url: str,
     trim_start: float,
     trim_end: float,
+    resolution: str,
+    quality: str,
+    video_volume: float,
+    video_muted: bool,
+    video_fade_in: float,
+    video_fade_out: float,
     text_overlay: str,
+    font_family: Optional[str],
+    font_size: int,
+    text_color: str,
+    text_bg_color: Optional[str],
+    text_position: str,
+    text_style: str,
     music_url: Optional[str],
+    music_volume: float,
+    music_fade_in: float,
+    music_fade_out: float,
+    music_start: float,
+    watermark_url: Optional[str],
+    watermark_position: str,
+    watermark_opacity: float,
 ) -> Dict[str, Any]:
     if trim_end <= trim_start:
         raise ValueError("Trim end must be greater than trim start")
@@ -168,20 +191,30 @@ def _build_movie_payload(
         "src": source_url,
         "seek": round(trim_start, 3),
         "duration": clip_length,
+        "volume": 0 if video_muted else video_volume,
     }
+    if video_fade_in > 0:
+        video_element["fade-in"] = video_fade_in
+    if video_fade_out > 0:
+        video_element["fade-out"] = video_fade_out
 
     elements = [video_element]
 
     if text_overlay:
-        elements.append(
-            {
-                "type": "text",
-                "text": text_overlay,
-                "style": "minimal",
-                "position": "bottom-center",
-                "duration": min(clip_length, 5),
-            }
-        )
+        text_element: Dict[str, Any] = {
+            "type": "text",
+            "text": text_overlay,
+            "style": text_style,
+            "position": text_position,
+            "duration": min(clip_length, 5),
+            "font-size": font_size,
+            "color": text_color,
+        }
+        if font_family:
+            text_element["font-family"] = font_family
+        if text_bg_color:
+            text_element["background-color"] = text_bg_color
+        elements.append(text_element)
 
     if music_url:
         elements.append(
@@ -189,15 +222,27 @@ def _build_movie_payload(
                 "type": "audio",
                 "src": music_url,
                 "duration": clip_length,
-                "volume": 0.4,
-                "fade-in": 1,
-                "fade-out": 1,
+                "volume": music_volume,
+                "fade-in": music_fade_in,
+                "fade-out": music_fade_out,
+                "start": round(music_start, 3),
+            }
+        )
+
+    if watermark_url:
+        elements.append(
+            {
+                "type": "image",
+                "src": watermark_url,
+                "duration": clip_length,
+                "position": watermark_position,
+                "opacity": watermark_opacity,
             }
         )
 
     return {
-        "resolution": "sd",
-        "quality": "medium",
+        "resolution": resolution,
+        "quality": quality,
         "scenes": [{"elements": elements}],
     }
 
@@ -207,8 +252,27 @@ def fetch_data(
     video_bytes: bytes,
     trim_start: float,
     trim_end: float,
+    resolution: str = "sd",
+    quality: str = "medium",
+    video_volume: float = 1.0,
+    video_muted: bool = False,
+    video_fade_in: float = 0.0,
+    video_fade_out: float = 0.0,
     text_overlay: str = "",
+    font_family: Optional[str] = None,
+    font_size: int = 32,
+    text_color: str = "#FFFFFF",
+    text_bg_color: Optional[str] = None,
+    text_position: str = "bottom-center",
+    text_style: str = "minimal",
     music_url: Optional[str] = None,
+    music_volume: float = 0.4,
+    music_fade_in: float = 1.0,
+    music_fade_out: float = 1.0,
+    music_start: float = 0.0,
+    watermark_bytes: Optional[bytes] = None,
+    watermark_position: str = "bottom-right",
+    watermark_opacity: float = 1.0,
 ) -> Dict[str, Any]:
     """Render a JSON2Video movie and return final video URL details."""
     if not api_key or not api_key.strip():
@@ -218,12 +282,35 @@ def fetch_data(
 
     source_url = _upload_video_source(api_key=api_key, video_bytes=video_bytes)
 
+    watermark_url = None
+    if watermark_bytes:
+        watermark_url = _upload_media_source(api_key, "watermark.png", watermark_bytes, "image/png")
+
     payload = _build_movie_payload(
         source_url=source_url,
         trim_start=trim_start,
         trim_end=trim_end,
+        resolution=resolution,
+        quality=quality,
+        video_volume=video_volume,
+        video_muted=video_muted,
+        video_fade_in=video_fade_in,
+        video_fade_out=video_fade_out,
         text_overlay=text_overlay,
+        font_family=font_family,
+        font_size=font_size,
+        text_color=text_color,
+        text_bg_color=text_bg_color,
+        text_position=text_position,
+        text_style=text_style,
         music_url=music_url,
+        music_volume=music_volume,
+        music_fade_in=music_fade_in,
+        music_fade_out=music_fade_out,
+        music_start=music_start,
+        watermark_url=watermark_url,
+        watermark_position=watermark_position,
+        watermark_opacity=watermark_opacity,
     )
 
     create_response = _request(
