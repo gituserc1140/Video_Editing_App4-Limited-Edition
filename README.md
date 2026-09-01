@@ -44,6 +44,8 @@ streamlit run app.py
    - **Text Styling**: for each text overlay, set the text, a `Start offset`/`Duration` (so overlays can appear at specific times instead of spanning the whole clip), `Font family`, `Font size`, `Text color`, optional `Text background color`, vertical/horizontal position, and a `Text style preset`.
    - **Audio**: for each audio track (background music or narration), set a publicly accessible audio URL, `Volume`, `Fade-in`/`Fade-out`, and `Start offset`.
    - **Watermark / Logo overlays**: for each image overlay, upload an image with configurable `Position`, `Opacity`, `Start offset`, and `Duration` (0 = spans the whole video).
+   - **AI Voiceover**: enable `Add AI voiceover narration`, enter a `Narration script`, and choose a `Voice` and `Voice model` (azure/elevenlabs) to generate spoken narration for the movie.
+   - **Auto Captions / Subtitles**: enable `Add automatic captions` to transcribe the movie's audio (including AI voiceover) into on-screen captions, with configurable `Caption language`, `Transcription model` (default/whisper), `Caption style`, `Caption font size`, and `Caption position`.
 
 4. **Render video**
    - Click `Render Video`.
@@ -59,5 +61,6 @@ streamlit run app.py
 - Text overlays are only added to the first clip's scene; subsequent clips render without overlays layered on top (a scope limitation for multi-clip renders).
 - Audio tracks and image/watermark overlays are added as movie-wide elements, so they span across all clips/scenes rather than a single clip.
 - The JSON2Video free tier does not restrict which element types, filters, or transitions are available — it limits total render credits, maximum video length (~3 minutes), and always adds a watermark. None of the controls in this app require a paid plan.
+- AI voiceover and auto-captions rely on JSON2Video's built-in TTS/transcription providers (Azure/ElevenLabs, Whisper) and may consume render credits faster than plain video edits since they add processing time.
 - Polling and timeout behavior can be adjusted via environment variables in `config/settings.py`.
 - Deployment (e.g. to Streamlit Community Cloud) is done manually and is outside the scope of this repository.

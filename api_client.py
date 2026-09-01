@@ -204,6 +204,8 @@ def _build_movie_payload(
     text_overlays: List[Dict[str, Any]],
     audio_tracks: List[Dict[str, Any]],
     image_overlays: List[Dict[str, Any]],
+    voiceover: Optional[Dict[str, Any]] = None,
+    subtitles: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if not clips:
         raise ValueError("At least one video clip is required")
@@ -301,6 +303,29 @@ def _build_movie_payload(
             image_element["duration"] = overlay["duration"]
         top_level_elements.append(image_element)
 
+    if voiceover and voiceover.get("text"):
+        voice_element: Dict[str, Any] = {
+            "type": "voice",
+            "text": voiceover["text"],
+            "voice": voiceover["voice"],
+        }
+        if voiceover.get("model"):
+            voice_element["model"] = voiceover["model"]
+        top_level_elements.append(voice_element)
+
+    if subtitles:
+        subtitles_element: Dict[str, Any] = {"type": "subtitles"}
+        if subtitles.get("language"):
+            subtitles_element["language"] = subtitles["language"]
+        if subtitles.get("model"):
+            subtitles_element["model"] = subtitles["model"]
+        subtitles_element["settings"] = {
+            "style": subtitles["style"],
+            "font-size": subtitles["font_size"],
+            "position": subtitles["position"],
+        }
+        top_level_elements.append(subtitles_element)
+
     payload: Dict[str, Any] = {
         "resolution": resolution,
         "quality": quality,
@@ -330,6 +355,8 @@ def fetch_data(
     text_overlays: Optional[List[Dict[str, Any]]] = None,
     audio_tracks: Optional[List[Dict[str, Any]]] = None,
     image_overlays: Optional[List[Dict[str, Any]]] = None,
+    voiceover: Optional[Dict[str, Any]] = None,
+    subtitles: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Render a JSON2Video movie and return final video URL details.
 
@@ -376,6 +403,8 @@ def fetch_data(
         text_overlays=resolved_text_overlays,
         audio_tracks=resolved_audio_tracks,
         image_overlays=resolved_image_overlays,
+        voiceover=voiceover,
+        subtitles=subtitles,
     )
 
     create_response = _request(

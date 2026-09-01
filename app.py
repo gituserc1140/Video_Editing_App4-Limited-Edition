@@ -72,6 +72,8 @@ if state["submitted"]:
                     text_overlays=state["text_overlays"],
                     audio_tracks=state["audio_tracks"],
                     image_overlays=image_overlays_payload,
+                    voiceover=state["voiceover"],
+                    subtitles=state["subtitles"],
                 )
             except Exception as exc:
                 st.error(f"Render request failed: {exc}")

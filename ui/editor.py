@@ -29,6 +29,18 @@ MAX_CLIPS = 5
 MAX_TEXT_OVERLAYS = 5
 MAX_IMAGE_OVERLAYS = 5
 MAX_AUDIO_TRACKS = 3
+VOICES = [
+    "en-US-EmmaMultilingualNeural",
+    "en-US-AndrewMultilingualNeural",
+    "en-GB-SoniaNeural",
+    "es-ES-ElviraNeural",
+    "fr-FR-DeniseNeural",
+    "de-DE-KatjaNeural",
+]
+VOICE_MODELS = ["azure", "elevenlabs"]
+SUBTITLE_LANGUAGES = ["auto", "en", "es", "fr", "de", "pt", "it"]
+SUBTITLE_MODELS = ["default", "whisper"]
+SUBTITLE_STYLES = ["classic", "classic-progressive", "bold", "minimal"]
 
 
 def render_editor_form() -> Dict[str, Any]:
@@ -270,6 +282,41 @@ def render_editor_form() -> Dict[str, Any]:
                 }
             )
 
+        st.subheader("AI Voiceover")
+        voiceover_enabled = st.checkbox("Add AI voiceover narration", value=False)
+        voiceover_text = st.text_area(
+            "Narration script", disabled=not voiceover_enabled, placeholder="Text to be spoken aloud"
+        )
+        col_voice, col_voice_model = st.columns(2)
+        with col_voice:
+            voiceover_voice = st.selectbox("Voice", VOICES, index=0, disabled=not voiceover_enabled)
+        with col_voice_model:
+            voiceover_model = st.selectbox("Voice model", VOICE_MODELS, index=0, disabled=not voiceover_enabled)
+
+        st.subheader("Auto Captions / Subtitles")
+        subtitles_enabled = st.checkbox("Add automatic captions", value=False)
+        col_sub_lang, col_sub_model = st.columns(2)
+        with col_sub_lang:
+            subtitle_language = st.selectbox(
+                "Caption language", SUBTITLE_LANGUAGES, index=0, disabled=not subtitles_enabled
+            )
+        with col_sub_model:
+            subtitle_model = st.selectbox(
+                "Transcription model", SUBTITLE_MODELS, index=0, disabled=not subtitles_enabled
+            )
+        col_sub_style, col_sub_size = st.columns(2)
+        with col_sub_style:
+            subtitle_style = st.selectbox(
+                "Caption style", SUBTITLE_STYLES, index=0, disabled=not subtitles_enabled
+            )
+        with col_sub_size:
+            subtitle_font_size = st.number_input(
+                "Caption font size", min_value=8, max_value=200, value=48, step=1, disabled=not subtitles_enabled
+            )
+        subtitle_position = st.selectbox(
+            "Caption position", VERTICAL_POSITIONS, index=2, key="subtitle_position", disabled=not subtitles_enabled
+        )
+
         submitted = st.form_submit_button("Render Video", use_container_width=True)
 
     return {
@@ -291,6 +338,26 @@ def render_editor_form() -> Dict[str, Any]:
         "text_overlays": text_overlays,
         "audio_tracks": audio_tracks,
         "image_overlays": image_overlays,
+        "voiceover": (
+            {
+                "text": voiceover_text.strip(),
+                "voice": voiceover_voice,
+                "model": voiceover_model,
+            }
+            if voiceover_enabled and voiceover_text.strip()
+            else None
+        ),
+        "subtitles": (
+            {
+                "language": None if subtitle_language == "auto" else subtitle_language,
+                "model": subtitle_model,
+                "style": subtitle_style,
+                "font_size": int(subtitle_font_size),
+                "position": subtitle_position,
+            }
+            if subtitles_enabled
+            else None
+        ),
     }
 
 
