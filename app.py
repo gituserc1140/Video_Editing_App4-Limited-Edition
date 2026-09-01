@@ -16,41 +16,62 @@ if css_path.exists():
 state = render_editor_form()
 
 if state["submitted"]:
+    missing_clip = any(clip["video_file"] is None for clip in state["clips"])
+    invalid_trim = any(clip["trim_end"] <= clip["trim_start"] for clip in state["clips"])
+
     if not state["api_key"]:
         st.error("Please enter your JSON2Video API key.")
-    elif state["video_file"] is None:
-        st.error("Please upload a video file.")
-    elif state["trim_end"] <= state["trim_start"]:
-        st.error("Trim end must be greater than trim start.")
+    elif not state["clips"]:
+        st.error("Please add at least one video clip.")
+    elif missing_clip:
+        st.error("Please upload a video file for every clip.")
+    elif invalid_trim:
+        st.error("Trim end must be greater than trim start for every clip.")
     else:
         with st.spinner("Uploading and rendering video..."):
             try:
+                clips_payload = [
+                    {
+                        "video_bytes": clip["video_file"].getvalue(),
+                        "trim_start": clip["trim_start"],
+                        "trim_end": clip["trim_end"],
+                        "video_volume": clip["video_volume"],
+                        "video_muted": clip["video_muted"],
+                        "video_fade_in": clip["video_fade_in"],
+                        "video_fade_out": clip["video_fade_out"],
+                    }
+                    for clip in state["clips"]
+                ]
+                image_overlays_payload = [
+                    {
+                        "image_bytes": overlay["file"].getvalue() if overlay["file"] else None,
+                        "position": overlay["position"],
+                        "opacity": overlay["opacity"],
+                        "start": overlay["start"],
+                        "duration": overlay["duration"],
+                    }
+                    for overlay in state["image_overlays"]
+                    if overlay["file"] is not None
+                ]
+
                 result = api_client.fetch_data(
                     api_key=state["api_key"],
-                    video_bytes=state["video_file"].getvalue(),
-                    trim_start=state["trim_start"],
-                    trim_end=state["trim_end"],
+                    clips=clips_payload,
                     resolution=state["resolution"],
                     quality=state["quality"],
-                    video_volume=state["video_volume"],
-                    video_muted=state["video_muted"],
-                    video_fade_in=state["video_fade_in"],
-                    video_fade_out=state["video_fade_out"],
-                    text_overlay=state["text_overlay"],
-                    font_family=state["font_family"],
-                    font_size=state["font_size"],
-                    text_color=state["text_color"],
-                    text_bg_color=state["text_bg_color"],
-                    text_position=state["text_position"],
-                    text_style=state["text_style"],
-                    music_url=state["music_url"],
-                    music_volume=state["music_volume"],
-                    music_fade_in=state["music_fade_in"],
-                    music_fade_out=state["music_fade_out"],
-                    music_start=state["music_start"],
-                    watermark_bytes=state["watermark_file"].getvalue() if state["watermark_file"] else None,
-                    watermark_position=state["watermark_position"],
-                    watermark_opacity=state["watermark_opacity"],
+                    speed=state["speed"],
+                    rotate=state["rotate"],
+                    zoom_level=state["zoom_level"],
+                    brightness=state["brightness"],
+                    contrast=state["contrast"],
+                    saturation=state["saturation"],
+                    color_preset=state["color_preset"],
+                    duck_level=state["duck_level"],
+                    transition_type=state["transition_type"],
+                    transition_duration=state["transition_duration"],
+                    text_overlays=state["text_overlays"],
+                    audio_tracks=state["audio_tracks"],
+                    image_overlays=image_overlays_payload,
                 )
             except Exception as exc:
                 st.error(f"Render request failed: {exc}")

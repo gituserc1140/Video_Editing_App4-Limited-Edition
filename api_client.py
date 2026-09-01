@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import mimetypes
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -151,166 +151,231 @@ def _upload_media_source(api_key: str, file_name: str, file_bytes: bytes, defaul
     return str(file_url)
 
 
-def _upload_video_source(api_key: str, video_bytes: bytes) -> str:
-    return _upload_media_source(api_key, "clip.mp4", video_bytes, "video/mp4")
+def _upload_video_source(api_key: str, video_bytes: bytes, index: int = 0) -> str:
+    return _upload_media_source(api_key, f"clip-{index}.mp4", video_bytes, "video/mp4")
+
+
+def _apply_visual_adjustments(
+    video_element: Dict[str, Any],
+    *,
+    speed: float,
+    rotate: int,
+    zoom_level: Optional[float],
+    brightness: float,
+    contrast: float,
+    saturation: float,
+    color_preset: Optional[str],
+    duck_level: Optional[float],
+) -> None:
+    if speed != 1.0:
+        video_element["speed"] = speed
+    if rotate:
+        video_element["rotate"] = rotate
+    if zoom_level:
+        video_element["zoom"] = zoom_level
+    if brightness != 1.0:
+        video_element["brightness"] = brightness
+    if contrast != 1.0:
+        video_element["contrast"] = contrast
+    if saturation != 1.0:
+        video_element["saturation"] = saturation
+    if color_preset == "grayscale":
+        video_element["grayscale"] = 1
+    elif color_preset == "sepia":
+        video_element["filter"] = "sepia"
+    if duck_level is not None:
+        video_element["duck"] = duck_level
 
 
 def _build_movie_payload(
-    source_url: str,
-    trim_start: float,
-    trim_end: float,
+    clips: List[Dict[str, Any]],
     resolution: str,
     quality: str,
-    video_volume: float,
-    video_muted: bool,
-    video_fade_in: float,
-    video_fade_out: float,
-    text_overlay: str,
-    font_family: Optional[str],
-    font_size: int,
-    text_color: str,
-    text_bg_color: Optional[str],
-    text_position: str,
-    text_style: str,
-    music_url: Optional[str],
-    music_volume: float,
-    music_fade_in: float,
-    music_fade_out: float,
-    music_start: float,
-    watermark_url: Optional[str],
-    watermark_position: str,
-    watermark_opacity: float,
+    speed: float,
+    rotate: int,
+    zoom_level: Optional[float],
+    brightness: float,
+    contrast: float,
+    saturation: float,
+    color_preset: Optional[str],
+    duck_level: Optional[float],
+    transition_type: Optional[str],
+    transition_duration: float,
+    text_overlays: List[Dict[str, Any]],
+    audio_tracks: List[Dict[str, Any]],
+    image_overlays: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    if trim_end <= trim_start:
-        raise ValueError("Trim end must be greater than trim start")
+    if not clips:
+        raise ValueError("At least one video clip is required")
 
-    clip_length = round(trim_end - trim_start, 3)
+    scenes: List[Dict[str, Any]] = []
+    first_clip_length = None
+    for index, clip in enumerate(clips):
+        trim_start = clip["trim_start"]
+        trim_end = clip["trim_end"]
+        if trim_end <= trim_start:
+            raise ValueError(f"Trim end must be greater than trim start (clip {index + 1})")
 
-    video_element: Dict[str, Any] = {
-        "type": "video",
-        "src": source_url,
-        "seek": round(trim_start, 3),
-        "duration": clip_length,
-        "volume": 0 if video_muted else video_volume,
-    }
-    if video_fade_in > 0:
-        video_element["fade-in"] = video_fade_in
-    if video_fade_out > 0:
-        video_element["fade-out"] = video_fade_out
+        clip_length = round(trim_end - trim_start, 3)
+        if first_clip_length is None:
+            first_clip_length = clip_length
 
-    elements = [video_element]
-
-    if text_overlay:
-        text_element: Dict[str, Any] = {
-            "type": "text",
-            "text": text_overlay,
-            "style": text_style,
-            "position": text_position,
-            "duration": min(clip_length, 5),
-            "font-size": font_size,
-            "color": text_color,
+        video_element: Dict[str, Any] = {
+            "type": "video",
+            "src": clip["source_url"],
+            "seek": round(trim_start, 3),
+            "duration": clip_length,
+            "volume": 0 if clip["video_muted"] else clip["video_volume"],
         }
-        if font_family:
-            text_element["font-family"] = font_family
-        if text_bg_color:
-            text_element["background-color"] = text_bg_color
-        elements.append(text_element)
+        if clip["video_fade_in"] > 0:
+            video_element["fade-in"] = clip["video_fade_in"]
+        if clip["video_fade_out"] > 0:
+            video_element["fade-out"] = clip["video_fade_out"]
 
-    if music_url:
-        elements.append(
+        _apply_visual_adjustments(
+            video_element,
+            speed=speed,
+            rotate=rotate,
+            zoom_level=zoom_level,
+            brightness=brightness,
+            contrast=contrast,
+            saturation=saturation,
+            color_preset=color_preset,
+            duck_level=duck_level,
+        )
+
+        scene_elements: List[Dict[str, Any]] = [video_element]
+
+        if index == 0:
+            for overlay in text_overlays:
+                if not overlay["text"]:
+                    continue
+                text_element: Dict[str, Any] = {
+                    "type": "text",
+                    "text": overlay["text"],
+                    "style": overlay["style"],
+                    "position": overlay["position"],
+                    "start": round(overlay["start"], 3),
+                    "duration": min(overlay["duration"], clip_length),
+                    "font-size": overlay["font_size"],
+                    "color": overlay["color"],
+                }
+                if overlay["font_family"]:
+                    text_element["font-family"] = overlay["font_family"]
+                if overlay["bg_color"]:
+                    text_element["background-color"] = overlay["bg_color"]
+                scene_elements.append(text_element)
+
+        scene: Dict[str, Any] = {"elements": scene_elements}
+        if transition_type and index < len(clips) - 1:
+            scene["transition"] = {"type": transition_type, "duration": transition_duration}
+        scenes.append(scene)
+
+    top_level_elements: List[Dict[str, Any]] = []
+
+    for track in audio_tracks:
+        if not track["url"]:
+            continue
+        top_level_elements.append(
             {
                 "type": "audio",
-                "src": music_url,
-                "duration": clip_length,
-                "volume": music_volume,
-                "fade-in": music_fade_in,
-                "fade-out": music_fade_out,
-                "start": round(music_start, 3),
+                "src": track["url"],
+                "volume": track["volume"],
+                "fade-in": track["fade_in"],
+                "fade-out": track["fade_out"],
+                "start": round(track["start"], 3),
             }
         )
 
-    if watermark_url:
-        elements.append(
-            {
-                "type": "image",
-                "src": watermark_url,
-                "duration": clip_length,
-                "position": watermark_position,
-                "opacity": watermark_opacity,
-            }
-        )
+    for overlay in image_overlays:
+        if not overlay.get("url"):
+            continue
+        image_element: Dict[str, Any] = {
+            "type": "image",
+            "src": overlay["url"],
+            "position": overlay["position"],
+            "opacity": overlay["opacity"],
+            "start": round(overlay["start"], 3),
+        }
+        if overlay["duration"]:
+            image_element["duration"] = overlay["duration"]
+        top_level_elements.append(image_element)
 
-    return {
+    payload: Dict[str, Any] = {
         "resolution": resolution,
         "quality": quality,
-        "scenes": [{"elements": elements}],
+        "scenes": scenes,
     }
+    if top_level_elements:
+        payload["elements"] = top_level_elements
+
+    return payload
 
 
 def fetch_data(
     api_key: str,
-    video_bytes: bytes,
-    trim_start: float,
-    trim_end: float,
+    clips: List[Dict[str, Any]],
     resolution: str = "sd",
     quality: str = "medium",
-    video_volume: float = 1.0,
-    video_muted: bool = False,
-    video_fade_in: float = 0.0,
-    video_fade_out: float = 0.0,
-    text_overlay: str = "",
-    font_family: Optional[str] = None,
-    font_size: int = 32,
-    text_color: str = "#FFFFFF",
-    text_bg_color: Optional[str] = None,
-    text_position: str = "bottom-center",
-    text_style: str = "minimal",
-    music_url: Optional[str] = None,
-    music_volume: float = 0.4,
-    music_fade_in: float = 1.0,
-    music_fade_out: float = 1.0,
-    music_start: float = 0.0,
-    watermark_bytes: Optional[bytes] = None,
-    watermark_position: str = "bottom-right",
-    watermark_opacity: float = 1.0,
+    speed: float = 1.0,
+    rotate: int = 0,
+    zoom_level: Optional[float] = None,
+    brightness: float = 1.0,
+    contrast: float = 1.0,
+    saturation: float = 1.0,
+    color_preset: Optional[str] = None,
+    duck_level: Optional[float] = None,
+    transition_type: Optional[str] = None,
+    transition_duration: float = 1.0,
+    text_overlays: Optional[List[Dict[str, Any]]] = None,
+    audio_tracks: Optional[List[Dict[str, Any]]] = None,
+    image_overlays: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Render a JSON2Video movie and return final video URL details."""
+    """Render a JSON2Video movie and return final video URL details.
+
+    ``clips`` is a list of dicts each containing ``video_bytes``, ``trim_start``, ``trim_end``,
+    ``video_volume``, ``video_muted``, ``video_fade_in`` and ``video_fade_out``.
+    """
     if not api_key or not api_key.strip():
         raise ValueError("A JSON2Video API key is required")
-    if not video_bytes:
-        raise ValueError("A video file upload is required")
+    if not clips:
+        raise ValueError("At least one video clip is required")
 
-    source_url = _upload_video_source(api_key=api_key, video_bytes=video_bytes)
+    uploaded_clips: List[Dict[str, Any]] = []
+    for index, clip in enumerate(clips):
+        video_bytes = clip.get("video_bytes")
+        if not video_bytes:
+            raise ValueError(f"A video file upload is required for clip {index + 1}")
+        source_url = _upload_video_source(api_key=api_key, video_bytes=video_bytes, index=index)
+        uploaded_clips.append({**clip, "source_url": source_url})
 
-    watermark_url = None
-    if watermark_bytes:
-        watermark_url = _upload_media_source(api_key, "watermark.png", watermark_bytes, "image/png")
+    resolved_text_overlays = text_overlays or []
+    resolved_audio_tracks = audio_tracks or []
+    resolved_image_overlays: List[Dict[str, Any]] = []
+    for overlay in image_overlays or []:
+        image_bytes = overlay.get("image_bytes")
+        overlay_url = None
+        if image_bytes:
+            overlay_url = _upload_media_source(api_key, "watermark.png", image_bytes, "image/png")
+        resolved_image_overlays.append({**overlay, "url": overlay_url})
 
     payload = _build_movie_payload(
-        source_url=source_url,
-        trim_start=trim_start,
-        trim_end=trim_end,
+        clips=uploaded_clips,
         resolution=resolution,
         quality=quality,
-        video_volume=video_volume,
-        video_muted=video_muted,
-        video_fade_in=video_fade_in,
-        video_fade_out=video_fade_out,
-        text_overlay=text_overlay,
-        font_family=font_family,
-        font_size=font_size,
-        text_color=text_color,
-        text_bg_color=text_bg_color,
-        text_position=text_position,
-        text_style=text_style,
-        music_url=music_url,
-        music_volume=music_volume,
-        music_fade_in=music_fade_in,
-        music_fade_out=music_fade_out,
-        music_start=music_start,
-        watermark_url=watermark_url,
-        watermark_position=watermark_position,
-        watermark_opacity=watermark_opacity,
+        speed=speed,
+        rotate=rotate,
+        zoom_level=zoom_level,
+        brightness=brightness,
+        contrast=contrast,
+        saturation=saturation,
+        color_preset=color_preset,
+        duck_level=duck_level,
+        transition_type=transition_type,
+        transition_duration=transition_duration,
+        text_overlays=resolved_text_overlays,
+        audio_tracks=resolved_audio_tracks,
+        image_overlays=resolved_image_overlays,
     )
 
     create_response = _request(
