@@ -166,6 +166,13 @@ def _apply_visual_adjustments(
     saturation: float,
     color_preset: Optional[str],
     duck_level: Optional[float],
+    flip_horizontal: bool = False,
+    flip_vertical: bool = False,
+    crop: Optional[Dict[str, int]] = None,
+    pan: Optional[str] = None,
+    pan_distance: Optional[int] = None,
+    pan_crop: Optional[str] = None,
+    chroma_key: Optional[Dict[str, Any]] = None,
 ) -> None:
     if speed != 1.0:
         video_element["speed"] = speed
@@ -185,6 +192,20 @@ def _apply_visual_adjustments(
         video_element["filter"] = "sepia"
     if duck_level is not None:
         video_element["duck"] = duck_level
+    if flip_horizontal:
+        video_element["flip-horizontal"] = True
+    if flip_vertical:
+        video_element["flip-vertical"] = True
+    if crop:
+        video_element["crop"] = crop
+    if pan:
+        video_element["pan"] = pan
+        if pan_distance:
+            video_element["pan-distance"] = pan_distance
+        if pan_crop:
+            video_element["pan-crop"] = pan_crop
+    if chroma_key:
+        video_element["chroma-key"] = chroma_key
 
 
 def _build_movie_payload(
@@ -206,6 +227,17 @@ def _build_movie_payload(
     image_overlays: List[Dict[str, Any]],
     voiceover: Optional[Dict[str, Any]] = None,
     subtitles: Optional[Dict[str, Any]] = None,
+    flip_horizontal: bool = False,
+    flip_vertical: bool = False,
+    crop: Optional[Dict[str, int]] = None,
+    pan: Optional[str] = None,
+    pan_distance: Optional[int] = None,
+    pan_crop: Optional[str] = None,
+    chroma_key: Optional[Dict[str, Any]] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    voiceovers: Optional[List[Dict[str, Any]]] = None,
+    extra_overlays: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     if not clips:
         raise ValueError("At least one video clip is required")
@@ -244,9 +276,29 @@ def _build_movie_payload(
             saturation=saturation,
             color_preset=color_preset,
             duck_level=duck_level,
+            flip_horizontal=flip_horizontal,
+            flip_vertical=flip_vertical,
+            crop=crop,
+            pan=pan,
+            pan_distance=pan_distance,
+            pan_crop=pan_crop,
+            chroma_key=chroma_key,
         )
 
-        scene_elements: List[Dict[str, Any]] = [video_element]
+        scene_elements: List[Dict[str, Any]] = []
+
+        background = clip.get("background") or {}
+        if background.get("mode") == "image" and background.get("image_url"):
+            scene_elements.append(
+                {
+                    "type": "image",
+                    "src": background["image_url"],
+                    "position": "center-center",
+                    "duration": clip_length,
+                }
+            )
+
+        scene_elements.append(video_element)
 
         if index == 0:
             for overlay in text_overlays:
@@ -269,6 +321,8 @@ def _build_movie_payload(
                 scene_elements.append(text_element)
 
         scene: Dict[str, Any] = {"elements": scene_elements}
+        if background.get("mode") == "color" and background.get("color"):
+            scene["background-color"] = background["color"]
         if transition_type and index < len(clips) - 1:
             scene["transition"] = {"type": transition_type, "duration": transition_duration}
         scenes.append(scene)
@@ -303,22 +357,58 @@ def _build_movie_payload(
             image_element["duration"] = overlay["duration"]
         top_level_elements.append(image_element)
 
-    if voiceover and voiceover.get("text"):
+    resolved_voiceovers = voiceovers or ([voiceover] if voiceover else [])
+    for segment in resolved_voiceovers:
+        if not segment or not segment.get("text"):
+            continue
         voice_element: Dict[str, Any] = {
             "type": "voice",
-            "text": voiceover["text"],
-            "voice": voiceover["voice"],
+            "text": segment["text"],
+            "voice": segment["voice"],
         }
-        if voiceover.get("model"):
-            voice_element["model"] = voiceover["model"]
+        if segment.get("model"):
+            voice_element["model"] = segment["model"]
+        if segment.get("start"):
+            voice_element["start"] = round(segment["start"], 3)
         top_level_elements.append(voice_element)
+
+    for extra in extra_overlays or []:
+        if extra.get("type") == "component" and extra.get("component"):
+            component_element: Dict[str, Any] = {
+                "type": "component",
+                "component": extra["component"],
+            }
+            if extra.get("settings"):
+                component_element["settings"] = extra["settings"]
+            if extra.get("start"):
+                component_element["start"] = round(extra["start"], 3)
+            if extra.get("duration"):
+                component_element["duration"] = extra["duration"]
+            top_level_elements.append(component_element)
+        elif extra.get("type") == "html" and extra.get("html"):
+            html_element: Dict[str, Any] = {
+                "type": "html",
+                "html": extra["html"],
+            }
+            if extra.get("tailwind"):
+                html_element["tailwind"] = True
+            if extra.get("position"):
+                html_element["position"] = extra["position"]
+            if extra.get("start"):
+                html_element["start"] = round(extra["start"], 3)
+            if extra.get("duration"):
+                html_element["duration"] = extra["duration"]
+            top_level_elements.append(html_element)
 
     if subtitles:
         subtitles_element: Dict[str, Any] = {"type": "subtitles"}
-        if subtitles.get("language"):
-            subtitles_element["language"] = subtitles["language"]
-        if subtitles.get("model"):
-            subtitles_element["model"] = subtitles["model"]
+        if subtitles.get("captions"):
+            subtitles_element["captions"] = subtitles["captions"]
+        else:
+            if subtitles.get("language"):
+                subtitles_element["language"] = subtitles["language"]
+            if subtitles.get("model"):
+                subtitles_element["model"] = subtitles["model"]
         subtitles_element["settings"] = {
             "style": subtitles["style"],
             "font-size": subtitles["font_size"],
@@ -331,6 +421,11 @@ def _build_movie_payload(
         "quality": quality,
         "scenes": scenes,
     }
+    if resolution == "custom":
+        if not width or not height:
+            raise ValueError("Custom resolution requires both width and height")
+        payload["width"] = width
+        payload["height"] = height
     if top_level_elements:
         payload["elements"] = top_level_elements
 
@@ -357,11 +452,24 @@ def fetch_data(
     image_overlays: Optional[List[Dict[str, Any]]] = None,
     voiceover: Optional[Dict[str, Any]] = None,
     subtitles: Optional[Dict[str, Any]] = None,
+    flip_horizontal: bool = False,
+    flip_vertical: bool = False,
+    crop: Optional[Dict[str, int]] = None,
+    pan: Optional[str] = None,
+    pan_distance: Optional[int] = None,
+    pan_crop: Optional[str] = None,
+    chroma_key: Optional[Dict[str, Any]] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    voiceovers: Optional[List[Dict[str, Any]]] = None,
+    extra_overlays: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Render a JSON2Video movie and return final video URL details.
 
     ``clips`` is a list of dicts each containing ``video_bytes``, ``trim_start``, ``trim_end``,
-    ``video_volume``, ``video_muted``, ``video_fade_in`` and ``video_fade_out``.
+    ``video_volume``, ``video_muted``, ``video_fade_in``, ``video_fade_out`` and an optional
+    ``background`` dict describing a scene-level background (``mode`` of ``none``, ``color`` or
+    ``image``, plus ``color`` and/or ``background_image_bytes``).
     """
     if not api_key or not api_key.strip():
         raise ValueError("A JSON2Video API key is required")
@@ -374,7 +482,18 @@ def fetch_data(
         if not video_bytes:
             raise ValueError(f"A video file upload is required for clip {index + 1}")
         source_url = _upload_video_source(api_key=api_key, video_bytes=video_bytes, index=index)
-        uploaded_clips.append({**clip, "source_url": source_url})
+        uploaded_clip = {**clip, "source_url": source_url}
+
+        background = clip.get("background") or {}
+        if background.get("mode") == "image":
+            background_bytes = background.get("image_bytes")
+            image_url = None
+            if background_bytes:
+                image_url = _upload_media_source(
+                    api_key, f"scene-background-{index}.png", background_bytes, "image/png"
+                )
+            uploaded_clip["background"] = {**background, "image_url": image_url}
+        uploaded_clips.append(uploaded_clip)
 
     resolved_text_overlays = text_overlays or []
     resolved_audio_tracks = audio_tracks or []
@@ -385,6 +504,18 @@ def fetch_data(
         if image_bytes:
             overlay_url = _upload_media_source(api_key, "watermark.png", image_bytes, "image/png")
         resolved_image_overlays.append({**overlay, "url": overlay_url})
+
+    resolved_voiceovers: List[Dict[str, Any]] = []
+    for segment in voiceovers or ([voiceover] if voiceover else []):
+        if segment and segment.get("text"):
+            resolved_voiceovers.append(segment)
+
+    resolved_subtitles = subtitles
+    if subtitles and subtitles.get("captions_file_bytes"):
+        captions_url = _upload_media_source(
+            api_key, subtitles.get("captions_file_name") or "captions.srt", subtitles["captions_file_bytes"], "text/plain"
+        )
+        resolved_subtitles = {**subtitles, "captions": captions_url}
 
     payload = _build_movie_payload(
         clips=uploaded_clips,
@@ -403,8 +534,19 @@ def fetch_data(
         text_overlays=resolved_text_overlays,
         audio_tracks=resolved_audio_tracks,
         image_overlays=resolved_image_overlays,
-        voiceover=voiceover,
-        subtitles=subtitles,
+        voiceover=None,
+        subtitles=resolved_subtitles,
+        flip_horizontal=flip_horizontal,
+        flip_vertical=flip_vertical,
+        crop=crop,
+        pan=pan,
+        pan_distance=pan_distance,
+        pan_crop=pan_crop,
+        chroma_key=chroma_key,
+        width=width,
+        height=height,
+        voiceovers=resolved_voiceovers,
+        extra_overlays=extra_overlays,
     )
 
     create_response = _request(
